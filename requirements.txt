@@ -1,17 +1,5 @@
-<<<<<<< HEAD
-requests>=2.31.0
-beautifulsoup4>=4.12.0
-python-dotenv>=1.0.0
-supabase>=1.0.0
-textblob>=0.17.0
-=======
-selenium>=4.0.0
-undetected-chromedriver>=3.5.0
-beautifulsoup4>=4.11.0
-pandas>=1.5.0
-requests>=2.28.0
-textblob>=0.17.0
-supabase>=1.0.0
-lxml>=4.9.0
-nltk>=3.8.0
->>>>>>> 531decd15bb9ec6cbb9e2f1a6dcf87dea1f56e9c
+requests
+beautifulsoup4
+python-dotenv
+supabase
+textblob

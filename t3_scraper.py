@@ -2,34 +2,33 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
-import math
+import uuid
+from datetime import datetime
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from textblob import TextBlob
 
 # --- Step 1: Load Environment Variables ---
-# This line loads the variables from your .env file
 load_dotenv()
 print("Attempting to load environment variables from .env file...")
 
 # --- Step 2: Supabase Configuration ---
-# Get credentials from the loaded environment variables
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-# Safety Check: Ensure that the variables were loaded correctly
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("FATAL: Supabase URL and Key must be set in your .env file. Please check the file.")
+    raise ValueError("FATAL: Supabase URL and Key must be set in your .env file.")
 else:
     print("Environment variables loaded successfully.")
 
-# Initialize the Supabase client
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
     print("Supabase client initialized successfully.")
 except Exception as e:
     raise RuntimeError(f"FATAL: Could not initialize Supabase client. Error: {e}")
 
+# Generate a unique version_id for this scrape run
+SCRAPE_VERSION_ID = str(uuid.uuid4())
 
 def is_indian_text(text):
     """Checks if the text is likely related to India."""
@@ -48,10 +47,6 @@ def is_indian_text(text):
 def generate_twitter_search_link(topic):
     """Generate a Twitter search link for the given topic."""
     return f"https://twitter.com/search?q={topic.replace('#', '%23')}"
-
-def generate_instagram_search_link(topic):
-    """Generate an Instagram search link for the given topic."""
-    return f"https://www.instagram.com/explore/tags/{topic.replace('#', '')}"
 
 def get_trending_topics():
     """Scrapes trending topics from trends24.in for India."""
@@ -94,7 +89,6 @@ def get_trending_topics():
                 if trend_text.startswith('#') and (is_indian_text(trend_text) or len(trending_topics) < 5):
                     tweet_count = "N/A"
                     
-                    # Generate Twitter search link only
                     twitter_link = generate_twitter_search_link(trend_text)
                     
                     parent_li = link.find_parent('li')
@@ -110,7 +104,6 @@ def get_trending_topics():
                     })
                     seen_topics.add(trend_text) 
                     print(f"  -> Added: {trend_text} (Count: {tweet_count})")
-                    print(f"     Twitter: {twitter_link}")
                     
                     if len(trending_topics) >= 9:
                         break
@@ -127,15 +120,11 @@ def get_trending_topics():
     print("All URLs failed. Returning empty list.")
     return []
 
-def get_hashtag_post_content(hashtag, link=None):
+def get_hashtag_post_content(hashtag):
     """Get sample post content for a hashtag."""
     try:
-        # For now, generate sample content based on hashtag
-        # In future, this could scrape actual posts from the link
-        
         hashtag_clean = hashtag.replace('#', '')
         
-        # Generate contextual sample content based on hashtag
         sample_contents = {
             'election': f"Breaking: Major developments in {hashtag_clean}. Citizens actively participating in democratic process.",
             'flood': f"Emergency update on {hashtag_clean}. Relief operations underway, stay safe and follow official guidelines.",
@@ -146,7 +135,6 @@ def get_hashtag_post_content(hashtag, link=None):
             'default': f"Trending discussion about {hashtag_clean}. Join the conversation and share your thoughts."
         }
         
-        # Match hashtag to appropriate content type
         hashtag_lower = hashtag_clean.lower()
         for key, content in sample_contents.items():
             if key in hashtag_lower:
@@ -161,16 +149,13 @@ def get_hashtag_post_content(hashtag, link=None):
 def analyze_hashtag_sentiment(hashtag):
     """Analyze the sentiment of a hashtag using TextBlob."""
     try:
-        # Clean the hashtag for better sentiment analysis
         clean_text = hashtag.replace('#', '').replace('_', ' ')
-        
-        # Create TextBlob object
         blob = TextBlob(clean_text)
         polarity = blob.sentiment.polarity
         
         print(f"DEBUG: Sentiment for '{hashtag}' -> polarity: {polarity}")
         
-        # More sensitive sentiment thresholds
+        # Determine sentiment label
         if polarity > 0.05:
             sentiment = "Positive"
         elif polarity < -0.05:
@@ -179,11 +164,11 @@ def analyze_hashtag_sentiment(hashtag):
             sentiment = "Neutral"
             
         print(f"DEBUG: Final sentiment: {sentiment}")
-        return sentiment
+        return sentiment, polarity
         
     except Exception as e:
         print(f"ERROR analyzing sentiment for {hashtag}: {e}")
-        return "Neutral"
+        return "Neutral", 0.0
 
 def calculate_engagement_score(topic_data):
     """Calculate engagement score for a trending topic (1-10 scale)."""
@@ -191,137 +176,136 @@ def calculate_engagement_score(topic_data):
         topic = topic_data.get("topic", "")
         count_str = topic_data.get("count", "N/A")
         
-        # Base score starts at 1
         engagement_score = 1.0
         
-        # Parse tweet count if available
         if count_str != "N/A" and count_str:
             try:
-                # Extract numeric value from count (e.g., "22K" -> 22000)
                 count_clean = count_str.replace('K', '000').replace('M', '000000').replace(',', '')
                 count_clean = ''.join(filter(str.isdigit, count_clean))
                 if count_clean:
                     tweet_count = int(count_clean)
-                    # Logarithmic scaling for tweet count (1-6 points)
                     if tweet_count > 0:
                         engagement_score += min(5, max(0, (tweet_count / 10000) * 2))
             except:
                 pass
         
-        # Topic characteristics bonus (up to 4 points)
         topic_lower = topic.lower()
         
-        # Trending keywords bonus
         trending_keywords = ['election', 'breaking', 'urgent', 'live', 'update', 'news']
         if any(keyword in topic_lower for keyword in trending_keywords):
             engagement_score += 1.5
         
-        # Indian relevance bonus
         indian_keywords = ['india', 'indian', 'bharath', 'delhi', 'mumbai', 'modi', 'bjp', 'congress']
         if any(keyword in topic_lower for keyword in indian_keywords):
             engagement_score += 1.0
         
-        # Hashtag length factor
         if len(topic) > 15:
             engagement_score += 0.5
         
-        # Special characters or numbers
         if any(char in topic for char in ['2024', '2023', '!', '@']):
             engagement_score += 0.5
         
-        # Cap the score at 10 and ensure minimum of 1
-        engagement_score = max(1, min(10, round(engagement_score)))
-        return int(engagement_score)
+        engagement_score = max(1, min(10, round(engagement_score, 2)))
+        return float(engagement_score)
         
     except Exception as e:
         print(f"Error calculating engagement score: {e}")
-        return 1
+        return 1.0
 
-def format_engagement_display(score):
-    """Format engagement score for terminal display with color coding."""
-    if score >= 8:
-        return f"🔥 {score} (Very High)"
-    elif score >= 6:
-        return f"⚡ {score} (High)"
-    elif score >= 4:
-        return f"📈 {score} (Medium)"
-    elif score >= 2:
-        return f"📊 {score} (Low)"
-    else:
-        return f"📉 {score} (Very Low)"
+def parse_post_count(count_str):
+    """Convert count string like '25K' or '2.1M' to actual number."""
+    if count_str == "N/A" or not count_str:
+        return 0
+    
+    try:
+        count_clean = count_str.replace(',', '')
+        
+        if 'M' in count_clean.upper():
+            return int(float(count_clean.upper().replace('M', '')) * 1000000)
+        elif 'K' in count_clean.upper():
+            return int(float(count_clean.upper().replace('K', '')) * 1000)
+        else:
+            return int(''.join(filter(str.isdigit, count_clean)))
+    except:
+        return 0
 
 def clear_all_supabase_data():
-    """Completely clear all existing data from Twitter trending_Hashtags table."""
+    """Clear all existing data from twitter table for Twitter platform."""
     try:
-        print("🗑️  CLEARING ALL EXISTING DATA from Twitter trending_Hashtags table...")
+        print("🗑️  CLEARING ALL EXISTING TWITTER DATA from twitter table...")
         
-        # Delete all records from Twitter trending_Hashtags table
-        result = supabase.table('Twitter trending_Hashtags').delete().gte('id', 0).execute()
+        # Delete only Twitter platform records
+        result = supabase.table('twitter').delete().eq('platform', 'Twitter').execute()
         
-        print("✅ ALL PREVIOUS DATA CLEARED from Twitter trending_Hashtags table.")
-        
-        print("\n⚠️  IMPORTANT: To reset ID numbers to start from 1:")
-        print("   1. Go to your Supabase Dashboard")
-        print("   2. Click on 'SQL Editor'")
-        print("   3. Run this command:")
-        print("      ALTER SEQUENCE \"Twitter trending_Hashtags_id_seq\" RESTART WITH 1;")
-        print("   4. Then run your scraper again")
-        print("\n   OR continue without resetting - your data will still be fresh!")
-        
+        print("✅ ALL PREVIOUS TWITTER DATA CLEARED from twitter table.")
         print("📊 Ready to insert fresh data.")
         
     except Exception as e:
         print(f"❌ ERROR clearing data: {e}")
 
 def insert_fresh_data_only(topics_list):
-    """Insert only fresh trending topics data after clearing all existing data."""
+    """Insert only fresh trending topics data after clearing existing data."""
     if not topics_list:
         print("No topics to store in Supabase.")
         return
     
-    # Step 1: Clear all existing data first
+    # Step 1: Clear existing Twitter data
     clear_all_supabase_data()
     
     try:
-        # Step 2: Process and insert only fresh data
+        # Step 2: Process and insert fresh data
         processed_topics = []
         print(f"\n📥 PROCESSING {len(topics_list)} FRESH TOPICS:")
         
         for i, topic in enumerate(topics_list):
             print(f"  {i+1}. Processing: {topic['topic']}")
             
-            # Calculate fresh engagement score
+            # Calculate engagement score
             engagement_score = calculate_engagement_score(topic)
             
-            # Calculate fresh sentiment
-            sentiment = analyze_hashtag_sentiment(topic["topic"])
+            # Calculate sentiment
+            sentiment_label, sentiment_polarity = analyze_hashtag_sentiment(topic["topic"])
             
-            # Get twitter link
+            # Get Twitter link
             twitter_link = topic.get("twitter_link", generate_twitter_search_link(topic["topic"]))
             
             # Get post content
             post_content = get_hashtag_post_content(topic["topic"])
             
+            # Parse post count
+            posts_count = parse_post_count(topic["count"])
+            
+            # Prepare metadata
+            metadata = {
+                "twitter_link": twitter_link,
+                "post_content": post_content,
+                "raw_count": topic["count"]
+            }
+            
+            # Create record matching new schema
             processed_topic = {
-                "topic": topic["topic"],
-                "count": topic["count"],
-                "engagement_score": int(engagement_score),
-                "sentiment": str(sentiment),
-                "twitter_link": str(twitter_link),
-                "post_content": str(post_content)
+                "platform": "Twitter",
+                "topic_hashtag": topic["topic"],
+                "engagement_score": float(engagement_score),
+                "sentiment_polarity": float(sentiment_polarity),
+                "sentiment_label": str(sentiment_label),
+                "posts": int(posts_count),
+                "views": 0,  # Twitter doesn't provide view counts
+                "metadata": metadata,
+                "version_id": SCRAPE_VERSION_ID
             }
             
             processed_topics.append(processed_topic)
-            print(f"     ✓ Engagement: {engagement_score} - Sentiment: {sentiment}")
-            print(f"     ✓ Post Content: {post_content[:60]}...")
-            print(f"     ✓ Data to store: {processed_topic}")
+            print(f"     ✓ Engagement: {engagement_score} - Sentiment: {sentiment_label} ({sentiment_polarity})")
+            print(f"     ✓ Posts: {posts_count}")
         
         # Step 3: Insert fresh data
         print(f"\n💾 INSERTING {len(processed_topics)} FRESH RECORDS...")
-        data, count = supabase.table('Twitter trending_Hashtags').insert(processed_topics).execute()
+        data, count = supabase.table('twitter').insert(processed_topics).execute()
         
         if data and len(data[1]) > 0:
             print(f"🎉 SUCCESS: {len(data[1])} fresh records inserted!")
+            print(f"📋 Scrape Version ID: {SCRAPE_VERSION_ID}")
             print("📋 Your Supabase now contains ONLY current trending topics.")
         else:
             print("⚠️  WARNING: Data insertion may have failed.")
@@ -329,104 +313,18 @@ def insert_fresh_data_only(topics_list):
     except Exception as e:
         print(f"❌ ERROR: {e}")
 
-def store_topics_in_supabase(topics_list):
-    """Inserts a list of topic dictionaries into the Supabase table."""
-    if not topics_list:
-        print("No topics to store in Supabase.")
-        return
-        
-    print(f"\nAttempting to store {len(topics_list)} topics in Supabase...")
-    
-    # Create payload with all available columns
-    supabase_topics = []
-    for topic in topics_list:
-        sentiment = analyze_hashtag_sentiment(topic["topic"])
-        post_content = get_hashtag_post_content(topic["topic"])
-        supabase_topic = {
-            "topic": topic["topic"],
-            "count": topic["count"],
-            "engagement_score": topic.get("engagement_score", 0),
-            "sentiment": sentiment,
-            "twitter_link": topic.get("twitter_link", ""),
-            "post_content": post_content
-        }
-        supabase_topics.append(supabase_topic)
-    
-    print("Data payload being sent:", supabase_topics)
-
-    try:
-        # Store all data including engagement_score, sentiment, and twitter_link
-        data, count = supabase.table('Twitter trending_Hashtags').insert(supabase_topics).execute()
-        
-        if data and len(data[1]) > 0:
-            print(f"SUCCESS: Successfully inserted {len(data[1])} records into Supabase.")
-            print("All data including engagement scores, sentiment, and Twitter links stored successfully.")
-        else:
-            print("WARNING: Data insertion may have failed. The API did not return any inserted data.")
-            print("Please check your Supabase dashboard's 'Twitter trending_Hashtags' table and RLS policies.")
-
-    except Exception as e:
-        print(f"ERROR: An error occurred while inserting data into Supabase: {e}")
-        print("Continuing with terminal display only...")
-
-def test_engagement_scores():
-    """Test function to demonstrate engagement score calculation with mock data."""
-    print("\n--- Testing Engagement Score Functionality ---")
-    
-    # Mock trending topics data similar to what we'd get from trends24.in
-    mock_topics = [
-        {"topic": "#Nepal", "count": "N/A"},
-        {"topic": "#SocialMediaBan", "count": "N/A"},
-        {"topic": "#TheBadsOfBollywood", "count": "N/A"},
-        {"topic": "#ISupportAryanMaan", "count": "25K"},
-        {"topic": "#OnePlusNordBuds3r", "count": "14K"},
-        {"topic": "#BharatRatna", "count": "N/A"},
-        {"topic": "#IndiaKaGame", "count": "N/A"},
-        {"topic": "#BharatJodoYatra", "count": "N/A"},
-        {"topic": "#BreakingNews", "count": "50K"},
-        {"topic": "#LiveUpdate", "count": "2.1M"}
-    ]
-    
-    print(f"Calculating engagement scores for {len(mock_topics)} trending topics:\n")
-    
-    for topic in mock_topics:
-        engagement_score = calculate_engagement_score(topic)
-        topic["engagement_score"] = engagement_score
-        sentiment = analyze_hashtag_sentiment(topic["topic"])
-        topic["sentiment"] = sentiment
-        post_content = get_hashtag_post_content(topic["topic"])
-        topic["post_content"] = post_content
-        print(f"  -> {topic['topic']} (Count: {topic['count']}) - Engagement: {format_engagement_display(engagement_score)} - Sentiment: {sentiment} - Post Content: {post_content}")
-    
-    print(f"\nMock data with engagement scores ready for Supabase storage!")
-    return mock_topics
-
 def main():
     """Main function to orchestrate the scraping and storing process."""
     print("\n--- Starting Twitter Trend Scraper ---")
+    print(f"Scrape Version ID: {SCRAPE_VERSION_ID}")
     
     trending_topics = get_trending_topics()
     
-    # If scraping fails, offer to test with mock data
     if not trending_topics:
         print("\nNo trending Indian hashtags found from trends24.in.")
         print("This could be due to network issues or site unavailability.")
-        print("\nWould you like to test the engagement score functionality with mock data?")
-        print("You can run: test_engagement_scores() in Python console or add the call below.")
-        
-        # Uncomment the next line to automatically test with mock data
-        # trending_topics = test_engagement_scores()
     else:
         print(f"\nSuccessfully found {len(trending_topics)} unique trending Indian hashtags!")
-        for topic in trending_topics:
-            engagement_score = calculate_engagement_score(topic)
-            topic["engagement_score"] = engagement_score
-            sentiment = analyze_hashtag_sentiment(topic["topic"])
-            topic["sentiment"] = sentiment
-            post_content = get_hashtag_post_content(topic["topic"])
-            topic["post_content"] = post_content
-            print(f"  -> {topic['topic']} (Count: {topic['count']}) - Engagement: {format_engagement_display(engagement_score)} - Sentiment: {sentiment} - Post Content: {post_content}")
-            print(f"     Twitter: {topic.get('twitter_link', 'N/A')}")
         
         insert_fresh_data_only(trending_topics)
 
