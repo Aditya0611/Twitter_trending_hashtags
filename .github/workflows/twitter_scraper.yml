@@ -1,5 +1,5 @@
 # Name of the workflow
-name: Scrape Twitter Trends Every 3 Hours
+name: Scrape Twitter Trends
 
 on:
   # Schedule to run at minute 0 of every 3rd hour (UTC)
@@ -10,13 +10,14 @@ on:
 
 jobs:
   scrape-and-update:
+    # Always specify the runner type
     runs-on: ubuntu-latest
     steps:
-      # 1. Checks out your repository code
+      # 1. CRITICAL: Checks out your repository code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Sets up Python environment
+      # 2. CRITICAL: Sets up the Python environment
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -28,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 4. CRITICAL: Download TextBlob corpora
+      # 4. CRITICAL: Download TextBlob Corpora
       # TextBlob needs these files for sentiment analysis.
       - name: Download TextBlob Corpora
         run: python -m textblob.download_corpora
