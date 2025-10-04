@@ -35,9 +35,7 @@ jobs:
 
       # 5. Run your Python scraper script
       - name: Run Scraper
+        run: python t3_scraper.py
         env:
-          # This makes your secrets available as environment variables
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-        # IMPORTANT: Make sure the filename here matches your script's name
-        run: python your_script_name.py
